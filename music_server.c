@@ -5,6 +5,7 @@
 #include <arpa/inet.h> //inet_addr
 #include <unistd.h>    //write
 #include <pthread.h> //for threading , link with lpthread
+#include <signal.h> //SIGPIPE
 
 #define SERVER_PORT (54321)
 //the thread function
@@ -43,6 +44,7 @@ int main(int argc , char *argv[])
 	int socket_desc , client_sock , c , *new_sock;
 	struct sockaddr_in server , client;
 	pthread_t pthread[3];
+    signal(SIGPIPE, SIG_IGN);
 	if( pthread_create( &(pthread[0]) , NULL ,  produce , NULL) < 0)
 	{
 		perror("could not create thread");
@@ -123,7 +125,6 @@ void *connection_handler(void *socket_desc)
 	while(1) {
 		pthread_cond_wait(&message_signal,&message_mtx);
 		//send new message
-		printf("sending %s...\n",global_message);
 		write_size=write(sock,global_message,strlen(global_message));
 		if (write_size <0) {
 			fprintf(stderr,"Error, exiting thread\n");
