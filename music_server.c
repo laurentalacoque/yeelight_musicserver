@@ -6,7 +6,7 @@
 #include <unistd.h>    //write
 #include <pthread.h> //for threading , link with lpthread
 
-#define SERVER_PORT (8888)
+#define SERVER_PORT (54321)
 //the thread function
 void *connection_handler(void *);
 void *producer_handler(void *);
@@ -15,18 +15,17 @@ int new_count=0;
 pthread_mutex_t message_mtx = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t message_signal = PTHREAD_COND_INITIALIZER;
 
-void produce(void){
+void* produce(void *arg){
 	while(1) {
 		pthread_mutex_lock(&message_mtx);
-
-		new_count += 1;
-		printf("producer : new_count=%d\n",new_count);
-		sprintf(global_message,"consumer: new count=%d\r\n",new_count);
-
+        new_count +=1;
+        sprintf(global_message,"{\"id\":1, \"method\":\"set_scene\", \"params\":[\"ct\", 5400, %d]}\r\n",new_count); 
+		if(new_count >=100) new_count=0;
 		pthread_cond_broadcast(&message_signal);
 		pthread_mutex_unlock(&message_mtx);
-		sleep(1);
+		usleep(100000);
 	}
+    return NULL;
 }
 /*
 void consume(void){
