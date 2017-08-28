@@ -1,74 +1,141 @@
-//Copy paste from tutorials points basic socket server
-//https://www.tutorialspoint.com/unix_sockets/socket_server_example.htm
 #include <stdio.h>
-#include <stdlib.h>
+#include <string.h>    //strlen
+#include <stdlib.h>    //strlen
+#include <sys/socket.h>
+#include <arpa/inet.h> //inet_addr
+#include <unistd.h>    //write
+#include <pthread.h> //for threading , link with lpthread
 
-#include <netdb.h>
-#include <netinet/in.h>
+#define SERVER_PORT (8888)
+//the thread function
+void *connection_handler(void *);
+void *producer_handler(void *);
+char global_message[1000];
+int new_count=0;
+pthread_mutex_t message_mtx = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t message_signal = PTHREAD_COND_INITIALIZER;
 
-#include <string.h>
+void produce(void){
+	while(1) {
+		pthread_mutex_lock(&message_mtx);
 
-int main( int argc, char *argv[] ) {
-   int sockfd, newsockfd, portno, clilen;
-   char buffer[256];
-   struct sockaddr_in serv_addr, cli_addr;
-   int  n;
-   
-   /* First call to socket() function */
-   sockfd = socket(AF_INET, SOCK_STREAM, 0);
-   
-   if (sockfd < 0) {
-      perror("ERROR opening socket");
-      exit(1);
-   }
-   
-   /* Initialize socket structure */
-   bzero((char *) &serv_addr, sizeof(serv_addr));
-   portno = 5001;
-   
-   serv_addr.sin_family = AF_INET;
-   serv_addr.sin_addr.s_addr = INADDR_ANY;
-   serv_addr.sin_port = htons(portno);
-   
-   /* Now bind the host address using bind() call.*/
-   if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-      perror("ERROR on binding");
-      exit(1);
-   }
-      
-   /* Now start listening for the clients, here process will
-      * go in sleep mode and will wait for the incoming connection
-   */
-   
-   listen(sockfd,5);
-   clilen = sizeof(cli_addr);
-   
-   /* Accept actual connection from the client */
-   newsockfd = accept(sockfd, (struct sockaddr *)&cli_addr, &clilen);
-	
-   if (newsockfd < 0) {
-      perror("ERROR on accept");
-      exit(1);
-   }
-   
-   /* If connection is established then start communicating */
-   bzero(buffer,256);
-   n = read( newsockfd,buffer,255 );
-   
-   if (n < 0) {
-      perror("ERROR reading from socket");
-      exit(1);
-   }
-   
-   printf("Here is the message: %s\n",buffer);
-   
-   /* Write a response to the client */
-   n = write(newsockfd,"I got your message",18);
-   
-   if (n < 0) {
-      perror("ERROR writing to socket");
-      exit(1);
-   }
-      
-   return 0;
+		new_count += 1;
+		printf("producer : new_count=%d\n",new_count);
+		sprintf(global_message,"consumer: new count=%d\r\n",new_count);
+
+		pthread_cond_broadcast(&message_signal);
+		pthread_mutex_unlock(&message_mtx);
+		sleep(1);
+	}
+}
+/*
+void consume(void){
+	pthread_mutex_lock(&message_mtx);
+	while(1) {
+		pthread_cond_wait(&message_signal,&message_mtx);
+		printf("consumer : new count: %d\n",new_count);
+	}
+	pthread_mutex_unlock(&message_mtx);
+}
+*/
+
+int main(int argc , char *argv[])
+{
+	int socket_desc , client_sock , c , *new_sock;
+	struct sockaddr_in server , client;
+	pthread_t pthread[3];
+	if( pthread_create( &(pthread[0]) , NULL ,  produce , NULL) < 0)
+	{
+		perror("could not create thread");
+		return 1;
+	}
+
+	//Create socket
+	socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+	if (socket_desc == -1)
+	{
+		printf("Could not create socket");
+	}
+	puts("Socket created");
+
+	//Prepare the sockaddr_in structure
+	server.sin_family = AF_INET;
+	server.sin_addr.s_addr = INADDR_ANY;
+	server.sin_port = htons( SERVER_PORT );
+
+	//Bind
+	if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
+	{
+		//print the error message
+		perror("bind failed. Error");
+		return 1;
+	}
+	puts("bind done");
+
+	//Listen
+	listen(socket_desc , 3);
+
+	//Accept and incoming connection
+	puts("Waiting for incoming connections...");
+	c = sizeof(struct sockaddr_in);
+
+
+	//Accept and incoming connection
+	/*puts("Waiting for incoming connections...");
+	  c = sizeof(struct sockaddr_in);*/
+
+	while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) )
+	{
+		puts("Connection accepted");
+
+		pthread_t sniffer_thread;
+		new_sock = malloc(sizeof(int*));
+		*new_sock = client_sock;
+
+		if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) new_sock) < 0)
+		{
+			perror("could not create thread");
+			return 1;
+		}
+
+		//Now join the thread , so that we dont terminate before the thread
+		//pthread_join( sniffer_thread , NULL); // was commented before
+		puts("Handler assigned");
+	}
+
+	if (client_sock < 0)
+	{
+		perror("accept failed");
+		return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * This will handle connection for each client
+ * */
+void *connection_handler(void *socket_desc)
+{
+	//Get the socket descriptor
+	int sock = *(int*)socket_desc;
+	int write_size;
+	pthread_mutex_lock(&message_mtx);
+	while(1) {
+		pthread_cond_wait(&message_signal,&message_mtx);
+		//send new message
+		printf("sending %s...\n",global_message);
+		write_size=write(sock,global_message,strlen(global_message));
+		if (write_size <0) {
+			fprintf(stderr,"Error, exiting thread\n");
+			//Free the socket pointer
+			pthread_mutex_unlock(&message_mtx);
+			free(socket_desc);
+			close(sock);
+			pthread_exit(NULL); 
+			return;
+		}
+	}
+	pthread_mutex_unlock(&message_mtx);
+
 }
